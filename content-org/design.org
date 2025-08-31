@@ -1,4 +1,6 @@
 #+TITLE: calico-fx design
+#+hugo_section: /
+#+export_file_name: _index
 
 * Goal
 Design a guitar effects processing software that is based on server-client mechanism. This software would run on an embedded board and may use the Neural network on the device to generate realistic processing effect. Here is an overview of what I am looking to implement

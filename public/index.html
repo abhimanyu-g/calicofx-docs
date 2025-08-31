@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+	<meta name="generator" content="Hugo 0.147.9"><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="
+  Goal
+  
+  #
+  
+
+Design a guitar effects processing software that is based on server-client mechanism. This software would run on an embedded board and may use the Neural network on the device to generate realistic processing effect. Here is an overview of what I am looking to implement
+
+
+Support lv2 plugins (at least in v1.0)
+
+
+Pipewire backend for all audio routing needs
+
+
+Support Bluetooth overlay for backing track support
+
+
+Front-end has a web interface to interact with the core application">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#343a40">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="//localhost:1313/">
+  <meta property="og:title" content="calico-fx design">
+  <meta property="og:description" content="Goal # Design a guitar effects processing software that is based on server-client mechanism. This software would run on an embedded board and may use the Neural network on the device to generate realistic processing effect. Here is an overview of what I am looking to implement
+Support lv2 plugins (at least in v1.0)
+Pipewire backend for all audio routing needs
+Support Bluetooth overlay for backing track support
+Front-end has a web interface to interact with the core application">
+  <meta property="og:locale" content="en">
+  <meta property="og:type" content="website">
+<title>calico-fx design | </title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="//localhost:1313/">
+<link rel="stylesheet" href="/book.min.d60d65c9fd57805d29fb9d7109cb03a93c46852bac9bb8cdfec366ee739b3605.css" integrity="sha256-1g1lyf1XgF0p&#43;51xCcsDqTxGhSusm7jN/sNm7nObNgU=" crossorigin="anonymous">
+  <script defer src="/fuse.min.js"></script>
+  <script defer src="/en.search.min.01e06485cbfd6fea743ffc3cf16bf807a385fbc0cd9e5c846259fd1d173a78e4.js" integrity="sha256-AeBkhcv9b&#43;p0P/w88Wv4B6OF&#43;8DNnlyEYln9HRc6eOQ=" crossorigin="anonymous"></script>
+<link rel="alternate" type="application/rss+xml" href="//localhost:1313/index.xml" title="" />
+<!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+  
+</head>
+<body dir="ltr" class="book-kind-home book-type-page">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span></span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input type="text" id="book-search-input" placeholder="Search" aria-label="Search" maxlength="64" data-hotkeys="s/" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/svg/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>calico-fx design</h3>
+
+  <label for="toc-control">
+    
+    <img src="/svg/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden clearfix">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#goal">Goal</a></li>
+    <li><a href="#operation">Operation</a></li>
+    <li><a href="#class-diagram">Class Diagram</a>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#session-manager">session-manager</a></li>
+        <li><a href="#pw-client">pw-client</a></li>
+        <li><a href="#plugin-base">Plugin Base</a></li>
+      </ul>
+    </li>
+    <li><a href="#detailed-flow">Detailed flow</a>
+      <ul>
+        <li><a href="#initialization">Initialization</a></li>
+        <li><a href="#adding-a-node">Adding a node</a></li>
+        <li><a href="#updating-a-control-value">Updating a control value</a></li>
+        <li><a href="#linking-ports">Linking ports</a></li>
+        <li><a href="#processing-audio">Processing audio</a></li>
+        <li><a href="#unlink-ports">Unlink ports</a></li>
+        <li><a href="#removing-a-node">Removing a node</a></li>
+        <li><a href="#de-initialize">De-initialize</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h2 id="goal">
+  Goal
+  
+  <a class="anchor" href="#goal">#</a>
+  
+</h2>
+<p>Design a guitar effects processing software that is based on server-client mechanism. This software would run on an embedded board and may use the Neural network on the device to generate realistic processing effect. Here is an overview of what I am looking to implement</p>
+<ul>
+<li>
+<p>Support lv2 plugins (at least in v1.0)</p>
+</li>
+<li>
+<p>Pipewire backend for all audio routing needs</p>
+</li>
+<li>
+<p>Support Bluetooth overlay for backing track support</p>
+</li>
+<li>
+<p>Front-end has a web interface to interact with the core application</p>
+<figure><img src="/ox-hugo/calicofx-design-overview.png">
+    </figure>
+
+</li>
+</ul>
+<h2 id="operation">
+  Operation
+  
+  <a class="anchor" href="#operation">#</a>
+  
+</h2>
+<p>During operation, each <em>lv2 plugin</em> instance is wrapped with <em>Pipewire client</em> and connected with <em>Pipewire daemon</em>. <a href="https://pipewire.org/">Pipewire</a> is a low-latency multimedia handling framework in Linux that is aimed to replace <a href="https://jackaudio.org/">JACK</a> and <a href="https://www.freedesktop.org/wiki/Software/PulseAudio/">pulse-audio</a> for audio routing.</p>
+<p>The user controls the software with web-ui (for now) over websockets and controls</p>
+<ul>
+<li>Routing(a.k.a Linking)</li>
+<li>Addition/Deletion</li>
+<li>Update parameters</li>
+</ul>
+<p>In operation, the graph might look something like this</p>
+<figure><img src="/ox-hugo/calicofx-flow-graph.png">
+</figure>
+
+<p>Note that,</p>
+<ul>
+<li>&ldquo;pw client + fx &lsquo;x&rsquo;&rdquo; Implies lv2 effect wrapped inside pipewire-client</li>
+<li>Each effect need not be strictly connected to the previous effect as shown in the diagram, since I follow a graph based routing, node linking is up-to the user&rsquo;s configuration</li>
+</ul>
+<h2 id="class-diagram">
+  Class Diagram
+  
+  <a class="anchor" href="#class-diagram">#</a>
+  
+</h2>
+<h3 id="overview">
+  Overview
+  
+  <a class="anchor" href="#overview">#</a>
+  
+</h3>
+<p>The overall class structure looks something like below. We enforce <em>pipewire</em> as the media manager but the plugins although is <em>lv2</em> now, can change in the future to support more plugin types. Hence, the plugins are abstracted</p>
+<figure><img src="/ox-hugo/calicofx-overview-class-dig.png">
+</figure>
+
+<h3 id="session-manager">
+  session-manager
+  
+  <a class="anchor" href="#session-manager">#</a>
+  
+</h3>
+<p>Session manager is responsible to</p>
+<ul>
+<li>Add/Remove new pw-clients as nodes</li>
+<li>Access stored nodes for params changes</li>
+<li>Link/unlink between multiple nodes/pw-clients</li>
+<li>Save and restore session ( &gt; v1.0)</li>
+</ul>
+<p>There would always be utmost 1 Session manager instance</p>
+<figure><img src="/ox-hugo/calicofx-session-mgr-class-dig.png">
+</figure>
+
+<h3 id="pw-client">
+  pw-client
+  
+  <a class="anchor" href="#pw-client">#</a>
+  
+</h3>
+<p>Since we use threaded main loop in our pw_client, all operations must happen within <a href="https://docs.pipewire.org/group__pw__thread__loop.html#gaa7996893e812e9eec61f786d1c691c54">pw_thread_loop_lock()</a> and <a href="https://docs.pipewire.org/group__pw__thread__loop.html#ga1f8042dce9da459ec61b6f3a2d6852d8">pw_thread_loop_unlock()</a></p>
+<h4 id="common-static-structures">
+  Common static structures
+  
+  <a class="anchor" href="#common-static-structures">#</a>
+  
+</h4>
+<p>Following are the common structures that are <em>file-static</em> and share with all the dynamically created clients. It is initialized once at the start of the program during <a href="#initialization">Initialization</a></p>
+<ul>
+<li><code>pw_thread_loop *loop</code></li>
+<li><code>pw_context *context</code></li>
+<li><code>pw_core *core</code></li>
+</ul>
+<p>During <a href="#de-initialize">De-initialize</a>, The above allocations are cleared</p>
+<ul>
+<li><code>loop</code> with <a href="https://docs.pipewire.org/group__pw__thread__loop.html#ga856c3aec5718bceb92d6169c42062186">pw_thread_loop_stop()</a> and <a href="https://docs.pipewire.org/group__pw__thread__loop.html#ga58bf781b6f987e80d4a7a6796551dfb1">pw_thread_loop_destroy()</a></li>
+<li><code>context</code> with <a href="https://docs.pipewire.org/group__pw__context.html#ga41fdab6368603144f0911541182713a1">pw_context_destroy()</a></li>
+<li><code>core</code> with <a href="https://docs.pipewire.org/group__pw__core.html#gaa0ad30957ad355b5217f161cc7847c2f">pw_core_disconnect()</a></li>
+</ul>
+<h4 id="class-details">
+  class details
+  
+  <a class="anchor" href="#class-details">#</a>
+  
+</h4>
+<figure><img src="/ox-hugo/calicofx-pw-client-class-dig.png">
+</figure>
+
+<ul>
+<li>
+<p><code>pwInitClient</code></p>
+<p>Init client initializes the pw-client and wraps the underlying plugin to provide a seamless abstraction to the above layers. The underlying plugin can be any of the supported types
+(refer <a href="#plugin-base">Plugin Base</a> and <a href="#adding-a-node">Adding a node</a> for more information).</p>
+</li>
+</ul>
+<ul>
+<li>
+<p><code>pwLinkClientPorts</code></p>
+<p>Links (a.k.a connects) the Source&rsquo;s output port to the Destination&rsquo;s input port. It utilizes the <em>impl</em> APIs and calls <a href="https://docs.pipewire.org/group__pw__impl__link.html#ga7d7c433db2954a961e4980a37168dc6d">pw_context_create_link</a> inside.
+It needs to be a static function (probably outside the class) as it operates on more than one pw-client</p>
+</li>
+</ul>
+<ul>
+<li>
+<p><code>pwUnlinkClientPorts</code></p>
+<p>Unlinks (a.k.a disconnects) 2 ports.</p>
+<ul>
+<li>Find the port using <a href="https://docs.pipewire.org/group__pw__impl__node.html#ga07267b71d5bbdf5312af836b240b4dab">pw_impl_node_find_port</a> from the src/dst UUID and src/dst PortIdx. This works because we would have set <code>port-id</code> as the port-index from the plugin desc</li>
+<li>Instead of storing the link structure, we would find it on the go using <a href="https://docs.pipewire.org/group__pw__impl__link.html#ga9dec6e3bcc59c5d9e7fb70bf36f86dd8">pw_impl_link_find</a> passing the ports found in the previous step</li>
+<li>Destroy it using <a href="https://docs.pipewire.org/group__pw__impl__link.html#ga3baed016411a9a3d0f7407c3a9144b39">pw_impl_link_destroy</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li>
+<p><code>~PipewireClient</code></p>
+<p>Destruct Pipewire client object and destroy underlying plugin instance and filter object</p>
+<ul>
+<li>Calls base plugin&rsquo;s destruct function</li>
+<li>Disconnects filter from the main-loop with <a href="https://docs.pipewire.org/group__pw__filter.html#ga913200b5d552335932cfe145bdf2a3e6">pw_filter_disconnect()</a></li>
+<li>Destroys the filter with <a href="https://docs.pipewire.org/group__pw__filter.html#gaf54752a2edef1c569fdfb8e6774b4ead">pw_filter_destroy()</a></li>
+</ul>
+</li>
+</ul>
+<ul>
+<li>
+<p>Processing</p>
+<p>Apart from the above global variables, the <a href="https://docs.pipewire.org/structpw__filter__events.html#a324db3b12bbac07c495395eae521e97a">processing of plugin</a> will be a common callback function. This is because all of the plugins have to perform following functionality in the sequence</p>
+<ul>
+<li>Get ports with <a href="https://docs.pipewire.org/group__pw__filter.html#gaf86eb47b3adbca1ddfb66235a8a5ae69">pw_filter_get_dsp_buffer()</a>. Do note that this only works as we register the node as a DSP media role</li>
+<li><a href="#pluginconnectport">Connect the ports</a> via Plugin Base and underlying plugin specific mechanism</li>
+<li>Run the plugin instance with <a href="#pluginrun">pluginRun</a></li>
+</ul>
+<p>During the addition of ports, the port_ID of the pw_client was configured to be the same as the port&rsquo;s index of the plugin. The same shall be used to connect the ports.
+Also during the filter creation using <a href="https://docs.pipewire.org/group__pw__filter.html#gafff846bdbb4f52cac93f27a19c073e05">pw_filter_new_simple()</a>, an opaque pointer for the user data was passed. This user data is mostly a reference to <em>pluginMgr</em> of the class. The same would be passed to process callback</p>
+</li>
+</ul>
+<h3 id="plugin-base">
+  Plugin Base
+  
+  <a class="anchor" href="#plugin-base">#</a>
+  
+</h3>
+<p>Plugin base is an abstract class which provides the interface to pipewire client class. This helps to interface various plugin types (vst, ladspa, clap&hellip;).
+For the v1.0, we would be supporting only <em>lv2</em> type plugins</p>
+<p>This class would solely be controlled by <a href="#pw-client">pw-client</a>. Hence, there is an instance of <em>Plugin base</em> for every instance of <em>pw-client</em></p>
+<figure><img src="/ox-hugo/calicofx-plugin-base-class-dig.png">
+</figure>
+
+<h4 id="lv2-manager">
+  LV2-manager
+  
+  <a class="anchor" href="#lv2-manager">#</a>
+  
+</h4>
+<p>Class responsible to manage lv2 specific operation. I.e,</p>
+<ul>
+<li>Parsing the plugins to fetch plugin description (ports, number and type of controls, metadata etc&hellip;)</li>
+<li>Instantiating and un-instantiating a plugin</li>
+<li>Run a plugin instance for every sample</li>
+</ul>
+<figure><img src="/ox-hugo/calicofx-lv2-manager-class-dig.png">
+</figure>
+
+<ul>
+<li>
+<p><code>pluginUpdateParam</code></p>
+<p><code>pluginUpdateParam</code> will internally call <a href="https://drobilla.net/docs/lilv/index.html#c.lilv_instance_connect_port">lilv_instance_connect_port</a> from the <em>lilv</em> library to connect a control port of the current instance to a value and update it, therefore updating the plugin instance&rsquo;s port value.</p>
+</li>
+</ul>
+<ul>
+<li>
+<p><code>pluginDeactivate</code> and <code>pluginDestroy</code></p>
+<p>Both are called at the termination of the <a href="#pipewireclient">pw_client</a>. <code>pluginDeactivate</code> for lv2 calls <a href="https://drobilla.net/docs/lilv/index.html#c.lilv_instance_deactivate">lilv_instance_deactivate()</a> to deactivate the active instance of lv2 plugin and <code>pluginDestroy</code> calls <a href="https://drobilla.net/docs/lilv/index.html#c.lilv_instance_free">lilv_instance_free()</a> to free the instance&rsquo;s resources.</p>
+</li>
+</ul>
+<ul>
+<li>
+<p><code>pluginConnectPort</code></p>
+<p>pluginConnectPort tries to connect the shared buffer to the plugin&rsquo;s port. The lv2 class override of this function calls <a href="https://drobilla.net/docs/lilv/index.html#c.lilv_instance_connect_port">lilv_instance_connect_port()</a> internally.</p>
+</li>
+</ul>
+<ul>
+<li>
+<p><code>pluginRun</code></p>
+<p>Run an instance of the plugin using the call to <a href="https://drobilla.net/docs/lilv/index.html#c.lilv_instance_run">lilv_instance_run()</a>. The process the input buffer according to the plugin&rsquo;s DSP and provides it at the output</p>
+</li>
+</ul>
+<h2 id="detailed-flow">
+  Detailed flow
+  
+  <a class="anchor" href="#detailed-flow">#</a>
+  
+</h2>
+<h3 id="initialization">
+  Initialization
+  
+  <a class="anchor" href="#initialization">#</a>
+  
+</h3>
+<p>Initialization refers to the global initialization and is expected to be called <strong>only once</strong> during the start of the program, there is also a <a href="#de-initialize">de-initialize</a> counterpart which does the opposite</p>
+<figure><img src="/ox-hugo/calicofx-initialization.png">
+</figure>
+
+<h3 id="adding-a-node">
+  Adding a node
+  
+  <a class="anchor" href="#adding-a-node">#</a>
+  
+</h3>
+<figure><img src="/ox-hugo/calicofx-adding-a-node.png">
+</figure>
+
+<h3 id="updating-a-control-value">
+  Updating a control value
+  
+  <a class="anchor" href="#updating-a-control-value">#</a>
+  
+</h3>
+<figure><img src="images/calicofx-update-control-param.png">
+</figure>
+
+<h3 id="linking-ports">
+  Linking ports
+  
+  <a class="anchor" href="#linking-ports">#</a>
+  
+</h3>
+<p>Linking ports refer to connection 2 ports in-order to let their data flow from one plugin to another or source to input of a plugin or plugin to the output.
+I have made the decision to not have any assumption about the connection and is left to the user preference. I.e</p>
+<ul>
+<li>No assumption is made to pre-connect ports when a new plugin is added.</li>
+<li>No assumption on how the ports are connected one-to-one, one-to-many, many-to-many</li>
+</ul>
+<p>However, to establish a link between 2 ports, it is required that the <em>source port</em> is plugin A&rsquo;s <code>output port</code> and the <em>sink port</em> is plugin B&rsquo;s <code>input port</code>.</p>
+<figure><img src="/ox-hugo/calicofx-link-ports.png">
+</figure>
+
+<h3 id="processing-audio">
+  Processing audio
+  
+  <a class="anchor" href="#processing-audio">#</a>
+  
+</h3>
+<p>Processing audio refers to handling the callback from the pipewire client. It involves connecting the input and output buffers to the appropriate ports of the underlying plugin and running the instance of that plugin to perform the intended audio effect on that input buffer and make the processed audio available on the output buffer.</p>
+<p>This is performed over and over all the plugin instances a.k.a pw-client nodes.</p>
+<p>Pipewire provides a <a href="https://docs.pipewire.org/structpw__filter__events.html#a324db3b12bbac07c495395eae521e97a">process</a> callback feature that is called for each pw-client filter node.
+In each callback, the sequence of events looks like below.</p>
+<figure><img src="/ox-hugo/calicofx-process-callback.png">
+</figure>
+
+<h3 id="unlink-ports">
+  Unlink ports
+  
+  <a class="anchor" href="#unlink-ports">#</a>
+  
+</h3>
+<p>Unlinking refers to removing the previously established link between pw-clients</p>
+<figure><img src="/ox-hugo/calicofx-unlink-ports.png">
+</figure>
+
+<h3 id="removing-a-node">
+  Removing a node
+  
+  <a class="anchor" href="#removing-a-node">#</a>
+  
+</h3>
+<figure><img src="/ox-hugo/calicofx-removing-a-node.png">
+</figure>
+
+<h3 id="de-initialize">
+  De-initialize
+  
+  <a class="anchor" href="#de-initialize">#</a>
+  
+</h3>
+<p>De-initialization is the final clean-up before closing the <em>calicofx</em> application. It does opposite of what <a href="#initialization">Initialization</a> does. As <em>calicofx</em> is planned to run as a service, De-initialization is triggered on receiving any system level signals (<code>SIGINT</code> or <code>SIGTERM</code>)</p>
+<figure><img src="/ox-hugo/calicofx-de-initialization.png">
+</figure>
+
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+
+
+
+
+</div>
+
+
+
+
+
+
+
+
+
+  <script>(function(){function e(e){const t=window.getSelection(),n=document.createRange();n.selectNodeContents(e),t.removeAllRanges(),t.addRange(n)}document.querySelectorAll("pre code").forEach(t=>{t.addEventListener("click",function(){if(window.getSelection().toString())return;e(t.parentElement),navigator.clipboard&&navigator.clipboard.writeText(t.parentElement.textContent)})})})()</script>
+
+
+ 
+        
+      </footer>
+
+      
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+
+<aside class="book-toc">
+  <div class="book-toc-content">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#goal">Goal</a></li>
+    <li><a href="#operation">Operation</a></li>
+    <li><a href="#class-diagram">Class Diagram</a>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#session-manager">session-manager</a></li>
+        <li><a href="#pw-client">pw-client</a></li>
+        <li><a href="#plugin-base">Plugin Base</a></li>
+      </ul>
+    </li>
+    <li><a href="#detailed-flow">Detailed flow</a>
+      <ul>
+        <li><a href="#initialization">Initialization</a></li>
+        <li><a href="#adding-a-node">Adding a node</a></li>
+        <li><a href="#updating-a-control-value">Updating a control value</a></li>
+        <li><a href="#linking-ports">Linking ports</a></li>
+        <li><a href="#processing-audio">Processing audio</a></li>
+        <li><a href="#unlink-ports">Unlink ports</a></li>
+        <li><a href="#removing-a-node">Removing a node</a></li>
+        <li><a href="#de-initialize">De-initialize</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+  </div>
+</aside>
+
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
