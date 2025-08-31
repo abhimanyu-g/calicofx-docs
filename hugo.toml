@@ -1,4 +1,4 @@
-baseURL = 'https://abhimanyu-g.github.io/calicofx-docs/'
+baseURL = 'docs.abhimanyu-g.github.io/calicofx'
 languageCode = 'en-us'
 title = 'Calicofx Documentation'
 theme = 'hugo-book'
