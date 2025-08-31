@@ -1,0 +1,488 @@
+#+TITLE: calico-fx design
+
+* Goal
+Design a guitar effects processing software that is based on server-client mechanism. This software would run on an embedded board and may use the Neural network on the device to generate realistic processing effect. Here is an overview of what I am looking to implement
+- Support lv2 plugins (at least in v1.0)
+- Pipewire backend for all audio routing needs
+- Support Bluetooth overlay for backing track support
+- Front-end has a web interface to interact with the core application
+  #+begin_src plantuml :file /tmp/calicofx-design-overview.png :results output
+    @startuml
+    [Frontend UI] as ui
+    [Calicofx core] as core
+    [Pipewire daemon] as pw
+    [LV2 plugins] as lv2
+
+    ui <--> core : websockets
+    core <--> pw : pipewire-APIs
+    core --> lv2 : lilv2-APIs
+    @enduml
+  #+end_src
+
+* Operation
+During operation, each /lv2 plugin/ instance is wrapped with /Pipewire client/ and connected with /Pipewire daemon/. [[https://pipewire.org/][Pipewire]] is a low-latency multimedia handling framework in Linux that is aimed to replace [[https://jackaudio.org/][JACK]] and [[https://www.freedesktop.org/wiki/Software/PulseAudio/][pulse-audio]] for audio routing.
+
+The user controls the software with web-ui (for now) over websockets and controls
+- Routing(a.k.a Linking)
+- Addition/Deletion
+- Update parameters
+
+In operation, the graph might look something like this
+#+begin_src plantuml :file /tmp/calicofx-flow-graph.png :results output
+  @startuml
+  [Audio source] as in
+  [Audio sink] as out
+  [Pipewire Daemon] as pw
+  [BT (A2DP) Audio Sink] as bt
+  [pw-client + fx-1] as fx1
+  [pw-client + fx-2] as fx2
+  [pw-client + fx-3] as fx3
+  [pw-client + fx-4] as fx4
+
+  in -> pw
+  pw -> out
+  bt --> pw
+  fx1 -up--> pw
+  fx2 -up--> pw
+  fx3 -up--> pw
+  fx4 -up--> pw
+  @enduml
+#+end_src
+
+Note that,
+- "pw client + fx 'x'" Implies lv2 effect wrapped inside pipewire-client
+- Each effect need not be strictly connected to the previous effect as shown in the diagram, since I follow a graph based routing, node linking is up-to the user's configuration
+
+* Class Diagram
+** Overview
+The overall class structure looks something like below. We enforce /pipewire/ as the media manager but the plugins although is /lv2/ now, can change in the future to support more plugin types. Hence, the plugins are abstracted
+#+begin_src plantuml :file /tmp/calicofx-overview-class-dig.png :noweb yes
+  @startuml
+  class "SessionMgr" as mgr
+  class "PipewireClient" as pw
+  abstract class "PluginBase" as base
+  class "LV2Manager" as lv2
+
+  mgr .right.> pw
+  pw .right.> base
+  base <|.. lv2:implements
+
+  @enduml
+#+end_src
+
+** session-manager
+Session manager is responsible to
+- Add/Remove new pw-clients as nodes
+- Access stored nodes for params changes
+- Link/unlink between multiple nodes/pw-clients
+- Save and restore session ( > v1.0)
+
+There would always be utmost 1 Session manager instance
+#+name: SessionMgr
+#+begin_src plantuml :file /tmp/calicofx-session-mgr-class-dig.png
+  @startuml
+  enum ipcCommand{
+        IPC_ADD_NODE
+        IPC_UPDATE_PARAM
+        IPC_LINK
+        IPC_UNLINK
+        IPC_REMOVE_NODE
+  }
+  class SessionMgr{
+        -clientMap <string uuid, Client pw-client>
+        -string generateUUID (void)
+        +string sessionAddNode(string uri)
+        +int sessionRemoveNode(string uuid)
+        +int sessionUpdateNodeParam(int paramIdx, float val)
+        +int sessionLinkPort(string srcNodeUUID, int srcPortIdx, string dstNodeUUID, int dstPortIdx)
+        +int sessionUnlinkNode(string srcNodeUUID, int srcPortIdx, string dstNodeUUID, int dstPortIdx)
+        SessionMgr()
+        ~SessionMgr()
+  }
+  @enduml
+#+end_src
+
+** pw-client
+Since we use threaded main loop in our pw_client, all operations must happen within [[https://docs.pipewire.org/group__pw__thread__loop.html#gaa7996893e812e9eec61f786d1c691c54][pw_thread_loop_lock()]] and [[https://docs.pipewire.org/group__pw__thread__loop.html#ga1f8042dce9da459ec61b6f3a2d6852d8][pw_thread_loop_unlock()]]
+*** Common static structures
+Following are the common structures that are /file-static/ and share with all the dynamically created clients. It is initialized once at the start of the program during [[*Initialization][Initialization]]
+- ~pw_thread_loop *loop~
+- ~pw_context *context~
+- ~pw_core *core~
+
+During [[*De-initialize][De-initialize]], The above allocations are cleared
+- ~loop~ with [[https://docs.pipewire.org/group__pw__thread__loop.html#ga856c3aec5718bceb92d6169c42062186][pw_thread_loop_stop()]] and [[https://docs.pipewire.org/group__pw__thread__loop.html#ga58bf781b6f987e80d4a7a6796551dfb1][pw_thread_loop_destroy()]]
+- ~context~ with [[https://docs.pipewire.org/group__pw__context.html#ga41fdab6368603144f0911541182713a1][pw_context_destroy()]]
+- ~core~ with [[https://docs.pipewire.org/group__pw__core.html#gaa0ad30957ad355b5217f161cc7847c2f][pw_core_disconnect()]]
+
+*** class details
+#+name: PipewireClient
+#+begin_src plantuml :file /tmp/calicofx-pw-client-class-dig.png
+  @startuml
+  enum pluginType{
+        PLUGIN_TYPE_LV2
+  }
+  class PipewireClient{
+        -struct pw_filter *filter
+        -PluginBase *pluginMgr
+        +int pwInitClient(string uri, enum pluginType pluginType)
+        +int pwUpdateClientParam(int clientPortIdx, float value)
+        +static int pwLinkClientPorts(string srcNodeUUID, int srcPortIdx, string dstNodeUUID, int dstPortIdx)
+        +static int pwUnlinkClientPorts(string srcNodeUUID, int srcPortIdx, string dstNodeUUID, int dstPortIdx)
+        +~PipewireClient()
+  }
+  @enduml
+#+end_src
+
+**** ~pwInitClient~
+Init client initializes the pw-client and wraps the underlying plugin to provide a seamless abstraction to the above layers. The underlying plugin can be any of the supported types
+(refer [[*Plugin Base][Plugin Base]] and [[*Adding a node][Adding a node]] for more information).
+
+**** ~pwLinkClientPorts~
+Links (a.k.a connects) the Source's output port to the Destination's input port. It utilizes the /impl/ APIs and calls [[https://docs.pipewire.org/group__pw__impl__link.html#ga7d7c433db2954a961e4980a37168dc6d][pw_context_create_link]] inside.
+It needs to be a static function (probably outside the class) as it operates on more than one pw-client
+
+**** ~pwUnlinkClientPorts~
+Unlinks (a.k.a disconnects) 2 ports.
+- Find the port using [[https://docs.pipewire.org/group__pw__impl__node.html#ga07267b71d5bbdf5312af836b240b4dab][pw_impl_node_find_port]] from the src/dst UUID and src/dst PortIdx. This works because we would have set ~port-id~ as the port-index from the plugin desc
+- Instead of storing the link structure, we would find it on the go using [[https://docs.pipewire.org/group__pw__impl__link.html#ga9dec6e3bcc59c5d9e7fb70bf36f86dd8][pw_impl_link_find]] passing the ports found in the previous step
+- Destroy it using [[https://docs.pipewire.org/group__pw__impl__link.html#ga3baed016411a9a3d0f7407c3a9144b39][pw_impl_link_destroy]]
+
+**** ~~PipewireClient~
+Destruct Pipewire client object and destroy underlying plugin instance and filter object
+- Calls base plugin's destruct function
+- Disconnects filter from the main-loop with [[https://docs.pipewire.org/group__pw__filter.html#ga913200b5d552335932cfe145bdf2a3e6][pw_filter_disconnect()]]
+- Destroys the filter with [[https://docs.pipewire.org/group__pw__filter.html#gaf54752a2edef1c569fdfb8e6774b4ead][pw_filter_destroy()]]
+
+**** Processing
+Apart from the above global variables, the [[https://docs.pipewire.org/structpw__filter__events.html#a324db3b12bbac07c495395eae521e97a][processing of plugin]] will be a common callback function. This is because all of the plugins have to perform following functionality in the sequence
+- Get ports with [[https://docs.pipewire.org/group__pw__filter.html#gaf86eb47b3adbca1ddfb66235a8a5ae69][pw_filter_get_dsp_buffer()]]. Do note that this only works as we register the node as a DSP media role
+- [[*~pluginConnectPort~][Connect the ports]] via Plugin Base and underlying plugin specific mechanism
+- Run the plugin instance with [[*~pluginRun~][pluginRun]]
+
+During the addition of ports, the port_ID of the pw_client was configured to be the same as the port's index of the plugin. The same shall be used to connect the ports.
+Also during the filter creation using [[https://docs.pipewire.org/group__pw__filter.html#gafff846bdbb4f52cac93f27a19c073e05][pw_filter_new_simple()]], an opaque pointer for the user data was passed. This user data is mostly a reference to /pluginMgr/ of the class. The same would be passed to process callback
+
+
+** Plugin Base
+Plugin base is an abstract class which provides the interface to pipewire client class. This helps to interface various plugin types (vst, ladspa, clap...).
+For the v1.0, we would be supporting only /lv2/ type plugins
+
+This class would solely be controlled by [[*pw-client][pw-client]]. Hence, there is an instance of /Plugin base/ for every instance of /pw-client/
+#+begin_src plantuml :file /tmp/calicofx-plugin-base-class-dig.png :exports results
+  @startuml
+  struct portDesc{
+        string label
+        uint8_t index
+  }
+
+  struct controlPortDesc {
+        struct portDesc portInfo
+        float def
+        float max
+        float min
+        float val
+        bool hasScalePoints
+  }
+
+  class PluginBase{
+          +string pluginName
+          +uint8_t nAudioInPorts
+          +uint8_t nAudioOutPorts
+          +uint8_t nControlPorts
+        +vector <struct portDesc> audioInPortDesc
+          +vector <struct portDesc> audioOutPortDesc
+          +vector <struct controlPortDesc> controlPortDesc
+          +virtual int pluginInit(void* uri)= 0
+          +virtual int pluginActivate()= 0
+        +virtual int pluginConnectPort(uint8_t portIdx, float *buf) = 0
+          +virtual int pluginRun(int sampleRate)= 0
+        +virtual int pluginUpdateParam(uint8_t idx, float val) = 0
+        +virtual int pluginDeactivate()=0
+        +virtual int pluginDestroy()=0
+  }
+  @enduml
+#+end_src
+
+*** LV2-manager
+Class responsible to manage lv2 specific operation. I.e,
+- Parsing the plugins to fetch plugin description (ports, number and type of controls, metadata etc...)
+- Instantiating and un-instantiating a plugin
+- Run a plugin instance for every sample
+
+#+begin_src plantuml :file /tmp/calicofx-lv2-manager-class-dig.png :exports results
+  @startuml
+  left to right direction
+  struct portDesc{
+        string label
+        uint8_t index
+  }
+
+  struct controlPortDesc {
+        struct portDesc portInfo
+        float def
+        float max
+        float min
+        float val
+        bool hasScalePoints
+  }
+
+
+  class PluginBase{
+          +string pluginName
+          +uint8_t nAudioInPorts
+          +uint8_t nAudioOutPorts
+          +uint8_t nControlPorts
+          +vector <struct portDesc> audioInPortDesc
+          +vector <struct portDesc> audioOutPortDesc
+          +vector <struct controlPortDesc> controlPortDesc
+          +virtual int pluginInit()= 0
+          +virtual int pluginActivate()= 0
+          +virtual int pluginConnectPort(uint8_t portIdx, float *buf) = 0
+          +virtual int pluginRun(int sampleRate)= 0
+          +virtual int pluginUpdateParam(uint8_t idx, float val) = 0
+          +virtual int pluginDeactivate()=0
+          +virtual int pluginDestroy()=0
+  }
+
+  class LV2Manager{
+        -string uri
+        -LilvNode *pluginUriNode
+        -LilvNode *pluginNode
+        -LilvInstance *pluginInstance
+        +int pluginInit(void* uri) @override
+        +int pluginActivate() @override
+        +int pluginConnectPort(uint8_t portIdx, float *buf) @override
+        +int pluginRun(int sampleRate) @override
+        +int pluginUpdateParam(uint8_t idx, float val) @override
+        +int pluginDeactivate() @override
+          +int pluginDestroy() @override
+  }
+
+  LV2Manager ..|> PluginBase:Implements
+  controlPortDesc::portInfo ..> portDesc:Depends
+  PluginBase::audioInPortDesc ..> portDesc:Depends
+  PluginBase::audioOutPortDesc ..> portDesc:Depends
+  PluginBase::controlPortDesc ..> controlPortDesc:Depends
+
+  @enduml
+#+end_src
+
+**** ~pluginUpdateParam~
+ ~pluginUpdateParam~ will internally call [[https://drobilla.net/docs/lilv/index.html#c.lilv_instance_connect_port][lilv_instance_connect_port]] from the /lilv/ library to connect a control port of the current instance to a value and update it, therefore updating the plugin instance's port value.
+
+**** ~pluginDeactivate~ and ~pluginDestroy~
+Both are called at the termination of the [[*~~PipewireClient~][pw_client]]. ~pluginDeactivate~ for lv2 calls [[https://drobilla.net/docs/lilv/index.html#c.lilv_instance_deactivate][lilv_instance_deactivate()]] to deactivate the active instance of lv2 plugin and ~pluginDestroy~ calls [[https://drobilla.net/docs/lilv/index.html#c.lilv_instance_free][lilv_instance_free()]] to free the instance's resources.
+
+**** ~pluginConnectPort~
+pluginConnectPort tries to connect the shared buffer to the plugin's port. The lv2 class override of this function calls [[https://drobilla.net/docs/lilv/index.html#c.lilv_instance_connect_port][lilv_instance_connect_port()]] internally.
+**** ~pluginRun~
+Run an instance of the plugin using the call to [[https://drobilla.net/docs/lilv/index.html#c.lilv_instance_run][lilv_instance_run()]]. The process the input buffer according to the plugin's DSP and provides it at the output
+* Detailed flow
+** Initialization
+Initialization refers to the global initialization and is expected to be called *only once* during the start of the program, there is also a [[*De-initialize][de-initialize]] counterpart which does the opposite
+#+begin_src plantuml :file /tmp/calicofx-initialization.png :exports results
+  @startuml
+  participant "calicofx-core" as core
+  participant "session-manager" as mgr
+  participant "pw-client" as pw
+  participant "lv2-client" as lv2
+
+  core->mgr: create Session
+  mgr->pw:Initialize media sub-system
+
+  pw->pw:create main thread loop
+  pw->pw:create context from the main loop
+  pw->pw:connect context creating core
+
+  pw->lv2:Initialize plugin
+  lv2->lv2:Initalize world (a.k.a create context)
+  lv2->lv2:Load all plugins
+  lv2->pw
+  pw->mgr
+  mgr->core
+
+  @enduml
+#+end_src
+
+** Adding a node
+#+begin_src plantuml :file /tmp/calicofx-adding-a-node.png :results output
+  @startuml
+  participant "front-end" as ui
+  participant "calicofx-core" as core
+  participant "session-manager" as mgr
+  participant "pw-client" as pw
+  participant "lv2-client" as lv2
+
+  ui -> core : CALICOFX_ADD_NODE<uri>
+  core -> mgr: create a new node
+  mgr -> pw: create new pw-client
+  pw -> pw: initialize pw resources
+  pw -> pw: get a 'thread loop'
+  pw -> lv2: populate plugin descriptor for <uri>
+  activate pw
+        lv2 -> lv2: populate plugin description \n(# of audio in , out and control ports,\ntheir names, types, etc...)
+        lv2->pw
+  deactivate pw
+  pw -> pw: create a filter object
+  pw -> pw: add ports to filter object
+  pw -> pw: connect filter to get registered event callbacks
+  pw -> pw: start loop thread
+  pw -> mgr: pw-client object
+  mgr -> mgr: generate uuid
+  mgr -> mgr: save <uuid, pw-client>
+  mgr -> core: uuid
+  core -> ui: <<result, uuid>>
+  @enduml
+#+end_src
+
+** Updating a control value
+#+begin_src plantuml :file images/calicofx-update-control-param.png :results output
+  @startuml
+  participant "front-end" as ui
+  participant "calicofx-core" as core
+  participant "session-manager" as mgr
+  participant "pw-client" as pw
+  participant "lv2-client" as lv2
+
+  ui -> core : CALICOFX_UPDATE_PARAM <plugin-uuid, ctrl_idx, val>
+  core -> mgr : update parameter value
+  mgr -> mgr : fetch /pw_client/ from the map
+  mgr -> pw : update params (ctrl_idx, new_val)
+  pw -> lv2 : update params (ctrl_idx, new_val)
+  lv2 -> pw
+  pw -> mgr
+  mgr -> core
+  core -> ui
+  @enduml
+#+end_src
+
+** Linking ports
+Linking ports refer to connection 2 ports in-order to let their data flow from one plugin to another or source to input of a plugin or plugin to the output.
+I have made the decision to not have any assumption about the connection and is left to the user preference. I.e
+- No assumption is made to pre-connect ports when a new plugin is added.
+- No assumption on how the ports are connected one-to-one, one-to-many, many-to-many
+
+However, to establish a link between 2 ports, it is required that the /source port/ is plugin A's =output port= and the /sink port/ is plugin B's =input port=.
+
+#+begin_src plantuml :file /tmp/calicofx-link-ports.png :results output
+  @startuml
+  participant "front-end" as ui
+  participant "calicofx-core" as core
+  participant "session-manager" as mgr
+  participant "pw-client" as pw
+  participant "lv2-client" as lv2
+
+  ui -> core : CALICOFX_LINK <srcUUID, srcPortIdx, dstUUID, dstPortIdx>
+  core -> mgr: link clients
+  mgr -> mgr: get clients from UUID
+  mgr -> pw: pwLinkClientPorts (string srcNodeUUID, int srcPortIdx, string dstNodeUUID, int dstPortIdx)
+  pw -> mgr
+  mgr->core
+  core -> ui
+  @enduml
+#+end_src
+
+** Processing audio
+Processing audio refers to handling the callback from the pipewire client. It involves connecting the input and output buffers to the appropriate ports of the underlying plugin and running the instance of that plugin to perform the intended audio effect on that input buffer and make the processed audio available on the output buffer.
+
+This is performed over and over all the plugin instances a.k.a pw-client nodes.
+
+Pipewire provides a [[https://docs.pipewire.org/structpw__filter__events.html#a324db3b12bbac07c495395eae521e97a][process]] callback feature that is called for each pw-client filter node.
+In each callback, the sequence of events looks like below.
+#+begin_src plantuml :file /tmp/calicofx-process-callback.png :results output
+  participant "pw-client" as pw
+  participant "lv2-client" as lv2
+
+  [o-> pw : process callback()
+  pw->pw : get io buffers as float buffer pointers
+  pw->pw : connect io buffers to underlying plugin ports
+  pw->lv2 : run plugin instance
+  lv2->pw
+  [<- pw
+#+end_src
+
+** Unlink ports
+Unlinking refers to removing the previously established link between pw-clients
+#+begin_src plantuml :file /tmp/calicofx-unlink-ports.png :results output
+  participant "front-end" as ui
+  participant "calicofx-core" as core
+  participant "session-manager" as mgr
+  participant "pw-client" as pw
+  participant "lv2-client" as lv2
+
+  ui -> core : CALICOFX_UNLINK <srcUUID, srcPortIdx, dstUUID, dstPortIdx>
+  core -> mgr: sessionUnlinkNode (src, idx, dst, idx)
+  mgr -> mgr: get clients from UUID
+  mgr -> pw: pwUnlinkClientPorts (string srcNodeUUID, int srcPortIdx, string dstNodeUUID, int dstPortIdx)
+  pw -> pw: pw_impl_link_find (string srcNodeUUID, int srcPortIdx, string dstNodeUUID, int dstPortIdx)
+  pw -> pw: pw_impl_link_destroy (link)
+  pw -> mgr
+  mgr->core
+  core -> ui
+#+end_src
+
+** Removing a node
+#+begin_src plantuml :file /tmp/calicofx-removing-a-node.png :results output
+  @startuml
+  participant "front-end" as ui
+  participant "calicofx-core" as core
+  participant "session-manager" as mgr
+  participant "pw-client" as pw
+  participant "lv2-client" as lv2
+
+  ui -> core : CALICOFX_REMOVE_NODE<uuid>
+  core -> mgr: sessionRemoveNode(string uuid)
+  mgr-> mgr: get node <<uuid>>
+  mgr -> pw: delete node
+  activate pw
+        pw->lv2: delete instance
+        activate lv2
+        lv2 -> lv2: pluginDeactivateInstance(instance)
+        lv2 -> lv2: pluginInstanceFree(instance)
+        lv2 --> pw
+        destroy lv2
+        pw -> pw: filter disconnect(filter)
+        pw -> pw: filter destroy(filter)
+        pw --> mgr
+        destroy pw
+        mgr -> mgr: evict <<uuid>>
+        mgr -> core: result
+        core -> ui:result
+  @enduml
+#+end_src
+
+
+** De-initialize
+De-initialization is the final clean-up before closing the /calicofx/ application. It does opposite of what [[*Initialization][Initialization]] does. As /calicofx/ is planned to run as a service, De-initialization is triggered on receiving any system level signals (~SIGINT~ or ~SIGTERM~)
+#+begin_src plantuml :file /tmp/calicofx-de-initialization.png :exports results
+  @startuml
+  participant "calicofx-core" as core
+  participant "session-manager" as mgr
+  participant "pw-client" as pw
+  participant "lv2-client" as lv2
+
+  core->core: signal handler
+  core->mgr: delete session
+  activate mgr
+        loop pw-clients
+        mgr ->x pw: delete instance
+        pw ->x lv2: delete instance
+        mgr -> mgr: evit <<uuid>>
+        end
+        mgr -> core
+        destroy mgr
+        core -> pw: deinitialize
+  activate core
+        pw->pw:stop main thread loop
+        pw->pw:destroy main thread loop
+        pw->core
+  deactivate core
+  core->lv2:Deinitialize plugin
+  activate core
+        lv2->lv2:Deinitialize world (a.k.a delete context)
+        lv2->lv2:free all resources
+        lv2->core
+  deactivate core
+  @enduml
+#+end_src
