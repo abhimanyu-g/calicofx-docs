@@ -1,8 +1,17 @@
-#+TITLE: calico-fx design
-#+hugo_section: /
-#+export_file_name: _index
+#+hugo_section: calicofx
 
+* Introduction
+:PROPERTIES:
+:EXPORT_FILE_NAME: _index
+:EXPORT_TITLE: Calicofx
+:END:
+This is a calicofx page documentation
 * Goal
+:PROPERTIES:
+:EXPORT_FILE_NAME: goal
+:EXPORT_TITLE: project-goal
+:EXPORT_HUGO_WEIGHT: 1
+:END:
 Design a guitar effects processing software that is based on server-client mechanism. This software would run on an embedded board and may use the Neural network on the device to generate realistic processing effect. Here is an overview of what I am looking to implement
 - Support lv2 plugins (at least in v1.0)
 - Pipewire backend for all audio routing needs
@@ -22,6 +31,11 @@ Design a guitar effects processing software that is based on server-client mecha
   #+end_src
 
 * Operation
+:PROPERTIES:
+:EXPORT_FILE_NAME: operation
+:EXPORT_TITLE: User interaction and operation
+:EXPORT_HUGO_WEIGHT: 2
+:END:
 During operation, each /lv2 plugin/ instance is wrapped with /Pipewire client/ and connected with /Pipewire daemon/. [[https://pipewire.org/][Pipewire]] is a low-latency multimedia handling framework in Linux that is aimed to replace [[https://jackaudio.org/][JACK]] and [[https://www.freedesktop.org/wiki/Software/PulseAudio/][pulse-audio]] for audio routing.
 
 The user controls the software with web-ui (for now) over websockets and controls
@@ -56,6 +70,11 @@ Note that,
 - Each effect need not be strictly connected to the previous effect as shown in the diagram, since I follow a graph based routing, node linking is up-to the user's configuration
 
 * Class Diagram
+:PROPERTIES:
+:EXPORT_FILE_NAME: class-structure
+:EXPORT_TITLE: Class structure overview
+:EXPORT_HUGO_WEIGHT: 3
+:END:
 ** Overview
 The overall class structure looks something like below. We enforce /pipewire/ as the media manager but the plugins although is /lv2/ now, can change in the future to support more plugin types. Hence, the plugins are abstracted
 #+begin_src plantuml :file /tmp/calicofx-overview-class-dig.png :noweb yes
@@ -107,12 +126,12 @@ There would always be utmost 1 Session manager instance
 ** pw-client
 Since we use threaded main loop in our pw_client, all operations must happen within [[https://docs.pipewire.org/group__pw__thread__loop.html#gaa7996893e812e9eec61f786d1c691c54][pw_thread_loop_lock()]] and [[https://docs.pipewire.org/group__pw__thread__loop.html#ga1f8042dce9da459ec61b6f3a2d6852d8][pw_thread_loop_unlock()]]
 *** Common static structures
-Following are the common structures that are /file-static/ and share with all the dynamically created clients. It is initialized once at the start of the program during [[*Initialization][Initialization]]
+Following are the common structures that are /file-static/ and share with all the dynamically created clients. It is initialized once at the start of the program during [[id:eff3b192-8871-4ce1-a497-9e561a968531][Initialization]]
 - ~pw_thread_loop *loop~
 - ~pw_context *context~
 - ~pw_core *core~
 
-During [[*De-initialize][De-initialize]], The above allocations are cleared
+During [[id:f20c1bfd-eb47-4b18-9080-d1bba3ac0159][De-initialize]], The above allocations are cleared
 - ~loop~ with [[https://docs.pipewire.org/group__pw__thread__loop.html#ga856c3aec5718bceb92d6169c42062186][pw_thread_loop_stop()]] and [[https://docs.pipewire.org/group__pw__thread__loop.html#ga58bf781b6f987e80d4a7a6796551dfb1][pw_thread_loop_destroy()]]
 - ~context~ with [[https://docs.pipewire.org/group__pw__context.html#ga41fdab6368603144f0911541182713a1][pw_context_destroy()]]
 - ~core~ with [[https://docs.pipewire.org/group__pw__core.html#gaa0ad30957ad355b5217f161cc7847c2f][pw_core_disconnect()]]
@@ -138,7 +157,7 @@ During [[*De-initialize][De-initialize]], The above allocations are cleared
 
 **** ~pwInitClient~
 Init client initializes the pw-client and wraps the underlying plugin to provide a seamless abstraction to the above layers. The underlying plugin can be any of the supported types
-(refer [[*Plugin Base][Plugin Base]] and [[*Adding a node][Adding a node]] for more information).
+(refer [[*Plugin Base][Plugin Base]] and [[id:c7d1fce6-e602-4eda-b154-0b993e93cc68][Adding a node]] for more information).
 
 **** ~pwLinkClientPorts~
 Links (a.k.a connects) the Source's output port to the Destination's input port. It utilizes the /impl/ APIs and calls [[https://docs.pipewire.org/group__pw__impl__link.html#ga7d7c433db2954a961e4980a37168dc6d][pw_context_create_link]] inside.
@@ -280,8 +299,17 @@ Both are called at the termination of the [[*~~PipewireClient~][pw_client]]. ~pl
 pluginConnectPort tries to connect the shared buffer to the plugin's port. The lv2 class override of this function calls [[https://drobilla.net/docs/lilv/index.html#c.lilv_instance_connect_port][lilv_instance_connect_port()]] internally.
 **** ~pluginRun~
 Run an instance of the plugin using the call to [[https://drobilla.net/docs/lilv/index.html#c.lilv_instance_run][lilv_instance_run()]]. The process the input buffer according to the plugin's DSP and provides it at the output
-* Detailed flow
+
+* code-flow
+:PROPERTIES:
+:EXPORT_FILE_NAME: code-flow
+:EXPORT_TITLE: Detailed code flow
+:EXPORT_HUGO_WEIGHT: 4
+:END:
 ** Initialization
+:PROPERTIES:
+:ID:       eff3b192-8871-4ce1-a497-9e561a968531
+:END:
 Initialization refers to the global initialization and is expected to be called *only once* during the start of the program, there is also a [[*De-initialize][de-initialize]] counterpart which does the opposite
 #+begin_src plantuml :file /tmp/calicofx-initialization.png :exports results
   @startuml
@@ -308,6 +336,9 @@ Initialization refers to the global initialization and is expected to be called 
 #+end_src
 
 ** Adding a node
+:PROPERTIES:
+:ID:       c7d1fce6-e602-4eda-b154-0b993e93cc68
+:END:
 #+begin_src plantuml :file /tmp/calicofx-adding-a-node.png :results output
   @startuml
   participant "front-end" as ui
@@ -339,7 +370,7 @@ Initialization refers to the global initialization and is expected to be called 
 #+end_src
 
 ** Updating a control value
-#+begin_src plantuml :file images/calicofx-update-control-param.png :results output
+#+begin_src plantuml :file /tmp/calicofx-update-control-param.png :results output
   @startuml
   participant "front-end" as ui
   participant "calicofx-core" as core
@@ -456,6 +487,9 @@ Unlinking refers to removing the previously established link between pw-clients
 
 
 ** De-initialize
+:PROPERTIES:
+:ID:       f20c1bfd-eb47-4b18-9080-d1bba3ac0159
+:END:
 De-initialization is the final clean-up before closing the /calicofx/ application. It does opposite of what [[*Initialization][Initialization]] does. As /calicofx/ is planned to run as a service, De-initialization is triggered on receiving any system level signals (~SIGINT~ or ~SIGTERM~)
 #+begin_src plantuml :file /tmp/calicofx-de-initialization.png :exports results
   @startuml

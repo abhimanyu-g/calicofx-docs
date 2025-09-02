@@ -1,14 +1,9 @@
-+++
-title = "Introduction"
-author = ["Abhimanyu G"]
-draft = false
-bookToC = false
-bookSearchExclude = true
-bookFlatSection = false
-+++
+#+TITLE: Introduction
+#+HUGO_SECTION: /
+#+HUGO_CUSTOM_FRONT_MATTER: :bookToC false :bookSearchExclude true :bookFlatSection false
+#+EXPORT_FILE_NAME: _index
 
-## Hi there 👋🏻 {#hi-there}
-
+* Hi there 👋🏻
 Welcome to my world of documentation. I strongly believe that good documentation is how you inspire, share and learn all things interesting.
 
 I try to document everything I work on and is a constantly evolving space as I update the documentation and take upon new project adventures.
