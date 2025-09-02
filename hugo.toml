@@ -1,9 +1,12 @@
-baseURL = 'http://docs.abhimanyu-g.github.io/'
+baseURL = '/'
 languageCode = 'en-us'
-title = 'Calicofx Documentation'
+title = '🏠home'
 theme = 'hugo-book'
 
 [params]
   BookTheme = "auto" # light/dark mode auto switch
+  BookSection = '*'
+  BookSearch = false
+
 [outputs]
   home = ["HTML", "RSS", "JSON"]
